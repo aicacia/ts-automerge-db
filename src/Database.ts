@@ -9,11 +9,7 @@ import {
 	migrate,
 	type AutomergeDocumentHandle,
 } from "./util";
-import {
-	Document,
-	type DocumentEvents,
-	type CreateDocumentSchemaOptions,
-} from "./Document";
+import { Document, type CreateDocumentSchemaOptions } from "./Document";
 import {
 	Collection,
 	type CreateCollectionSchemaOptions,
@@ -22,6 +18,7 @@ import {
 	type RowSchema,
 } from "./Collection";
 import type { Doc } from "@automerge/automerge";
+import { isPromiseLike, type MaybePromiseLike } from "@aicacia/trycatch";
 
 export interface DatabaseSchema extends DocumentSchema {
 	documents: Record<string, AutomergeDocumentId>;
@@ -63,19 +60,17 @@ const databaseMigrations: Migrations<DatabaseSchema> = {
 };
 
 export interface DatabaseOptions<Documents, Collections> {
-	readonly databaseDocumentId?: AutomergeDocumentId<DatabaseSchema> | null;
+	readonly databaseDocumentId?: MaybePromiseLike<AutomergeDocumentId<DatabaseSchema> | null>;
 	readonly documents: Documents;
 	readonly collections: Collections;
 }
-
-export interface DatabaseEvents extends DocumentEvents<DatabaseSchema> {}
 
 export class Database<
 	Documents extends { [name: string]: unknown },
 	Collections extends {
 		[name: string]: unknown;
 	},
-> extends Document<DatabaseSchema, DatabaseEvents> {
+> extends Document<DatabaseSchema> {
 	readonly repo: Repo;
 
 	readonly documents: ExtractDocuments<Documents>;
@@ -83,10 +78,11 @@ export class Database<
 
 	constructor(repo: Repo, options: DatabaseOptions<Documents, Collections>) {
 		super(
-			initOrCreateDocument(
-				repo,
-				databaseMigrations,
-				options.databaseDocumentId,
+			(isPromiseLike(options.databaseDocumentId)
+				? options.databaseDocumentId
+				: Promise.resolve(options.databaseDocumentId)
+			).then((databaseDocumentId) =>
+				initOrCreateDocument(repo, databaseMigrations, databaseDocumentId),
 			),
 		);
 		this.repo = repo;

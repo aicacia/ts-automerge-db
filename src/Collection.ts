@@ -12,8 +12,8 @@ import {
 import type { Doc } from "@automerge/automerge";
 import { MultiError } from "./util/MultiError";
 import { Document } from "./Document";
-import { createType, type Type } from "./Type";
-import { err, ok, type Result } from "./util/result";
+import type { Type } from "./Type";
+import { err, ok, type Result } from "@aicacia/trycatch";
 
 export interface RowSchema extends DocumentSchema {
 	_collection: string;
@@ -68,11 +68,14 @@ export interface CreateCollectionSchemaOptions<R extends RowSchema> {
 	readonly rowMigrations?: Migrations<R>;
 }
 
-export function createCollectionSchema<R extends RowSchema>() {
-	return <const I extends CreateCollectionSchemaParameters<R>>(options: I) => ({
+export function createCollectionSchema<
+	R extends RowSchema,
+	const I extends CreateCollectionSchemaParameters<R>,
+>(type: Type<R>, options: I) {
+	return {
 		...options,
-		type: createType<R>(),
-	});
+		type,
+	};
 }
 
 export type CollectionFilterFn<R extends RowSchema> = (row: R) => boolean;
@@ -97,7 +100,7 @@ export class Collection<
 
 	constructor(
 		repo: Repo,
-		documentHandlePromise: Promise<AutomergeDocumentHandle<C>>,
+		documentHandlePromise: PromiseLike<AutomergeDocumentHandle<C>>,
 		name: string,
 		options: O,
 	) {
@@ -257,7 +260,7 @@ export class Collection<
 	) {
 		const rowHandle = await findDocument(this.repo, rowId);
 
-		let promise = Promise.resolve();
+		let promise: PromiseLike<void> = Promise.resolve();
 		rowHandle.change((row: R) => {
 			const previousIndexes = this.getIndexesForRow(row);
 			changeFn(row);
@@ -284,7 +287,7 @@ export class Collection<
 
 		await promise;
 
-		return [rowHandle.documentId, rowHandle.doc()] as RowResult<R>;
+		return [rowId, rowHandle.doc()] as RowResult<R>;
 	}
 
 	async delete(rowId: AutomergeDocumentId<R>) {

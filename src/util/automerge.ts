@@ -50,7 +50,11 @@ export function migrate<D extends DocumentSchema>(
 	}
 	let updated = false;
 
-	for (let version = initialVersion + 1; version <= migrationsSize; version++) {
+	for (
+		let version = initialVersion === -1 ? 1 : initialVersion + 1;
+		version <= migrationsSize;
+		version++
+	) {
 		const migrationFn = migrations[version];
 		if (migrationFn) {
 			docHandle.change((state: D) => {

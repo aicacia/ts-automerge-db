@@ -1,3 +1,4 @@
+import { browser } from "$app/environment";
 import { Repo } from "@automerge/automerge-repo";
 import { IndexedDBStorageAdapter } from "@automerge/automerge-repo-storage-indexeddb";
 import {
@@ -9,13 +10,13 @@ import { posts } from "./posts";
 import { comments } from "./comments";
 import { settings } from "./settings";
 
-const databaseDocumentId = localStorage.getItem(
-	"database-document-id",
+const databaseDocumentId = (
+	browser ? localStorage.getItem("database-document-id") : null
 ) as AutomergeDocumentId<DatabaseSchema> | null;
 
 export const db = new Database(
 	new Repo({
-		storage: new IndexedDBStorageAdapter(),
+		storage: browser ? new IndexedDBStorageAdapter() : undefined,
 	}),
 	{
 		databaseDocumentId,
@@ -29,14 +30,8 @@ export const db = new Database(
 	},
 );
 
-db.on("init", (documentId) => {
-	localStorage.setItem("database-document-id", documentId);
-});
-
-if (!databaseDocumentId) {
-	await db.collections.posts.create({
-		uri: "test",
-		title: "Test",
-		content: "This is a test and only a test.",
+if (browser) {
+	db.id().then((dbId) => {
+		localStorage.setItem("database-document-id", dbId);
 	});
 }

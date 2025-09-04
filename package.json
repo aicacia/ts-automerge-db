@@ -57,11 +57,19 @@
 		"tslib": "2"
 	},
 	"dependencies": {
-		"eventemitter3": "5"
+		"@aicacia/trycatch": "0"
 	},
 	"nyc": {
 		"include": ["src"],
 		"exclude": ["src/**/*.test.*", "src/**/*.benchmark.*"],
 		"extension": [".ts", ".tsx"]
+	},
+	"pnpm": {
+		"onlyBuiltDependencies": [
+			"@swc/core",
+			"@tailwindcss/oxide",
+			"cbor-extract",
+			"esbuild"
+		]
 	}
 }

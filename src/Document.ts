@@ -10,8 +10,7 @@ import type {
 	AutomergeDocumentId,
 } from "./util/automerge";
 import type { Doc } from "@automerge/automerge";
-import { createType, type Type } from "./Type";
-import { EventEmitter } from "eventemitter3";
+import type { Type } from "./Type";
 
 export interface CreateDocumentSchemaParameters<D extends DocumentSchema> {
 	readonly migrations?: Migrations<D>;
@@ -22,36 +21,25 @@ export interface CreateDocumentSchemaOptions<D extends DocumentSchema> {
 	readonly migrations?: Migrations<D>;
 }
 
-export function createDocumentSchema<D extends DocumentSchema>() {
-	return <const I extends CreateDocumentSchemaParameters<D>>(options: I) => ({
+export function createDocumentSchema<
+	D extends DocumentSchema,
+	const I extends CreateDocumentSchemaParameters<D>,
+>(type: Type<D>, options: I) {
+	return {
 		...options,
-		type: createType<D>(),
-	});
+		type,
+	};
 }
 
 export type DocumentSubscriber<D extends DocumentSchema> = (
 	doc: Doc<D>,
 ) => void;
 
-export interface DocumentEvents<D extends DocumentSchema> {
-	init(documentId: AutomergeDocumentId<D>): void;
-}
+export class Document<D extends DocumentSchema> {
+	protected documentHandlePromise: PromiseLike<AutomergeDocumentHandle<D>>;
 
-export class Document<
-	D extends DocumentSchema,
-	E extends DocumentEvents<D> = DocumentEvents<D>,
-> extends EventEmitter<E> {
-	protected documentHandlePromise: Promise<AutomergeDocumentHandle<D>>;
-
-	constructor(documentHandlePromise: Promise<AutomergeDocumentHandle<D>>) {
-		super();
-		this.documentHandlePromise = documentHandlePromise.then(
-			(documentHandle) => {
-				// @ts-expect-error
-				this.emit("init", documentHandle.documentId as AutomergeDocumentId<D>);
-				return documentHandle;
-			},
-		);
+	constructor(documentHandlePromise: PromiseLike<AutomergeDocumentHandle<D>>) {
+		this.documentHandlePromise = documentHandlePromise;
 	}
 
 	async id() {
