@@ -70,20 +70,23 @@ export class Database<
 	Collections extends {
 		[name: string]: unknown;
 	},
-> extends Document<DatabaseSchema> {
+> {
+	protected databaseDocumentHandlePromise: PromiseLike<
+		AutomergeDocumentHandle<DatabaseSchema>
+	>;
+
 	readonly repo: Repo;
 
 	readonly documents: ExtractDocuments<Documents>;
 	readonly collections: ExtractCollections<Collections>;
 
 	constructor(repo: Repo, options: DatabaseOptions<Documents, Collections>) {
-		super(
-			(isPromiseLike(options.databaseDocumentId)
+		this.databaseDocumentHandlePromise = (
+			isPromiseLike(options.databaseDocumentId)
 				? options.databaseDocumentId
 				: Promise.resolve(options.databaseDocumentId)
-			).then((databaseDocumentId) =>
-				initOrCreateDocument(repo, databaseMigrations, databaseDocumentId),
-			),
+		).then((databaseDocumentId) =>
+			initOrCreateDocument(repo, databaseMigrations, databaseDocumentId),
 		);
 		this.repo = repo;
 		// @ts-ignore
@@ -104,12 +107,17 @@ export class Database<
 		);
 	}
 
+	async id() {
+		const documentHandle = await this.databaseDocumentHandlePromise;
+		return documentHandle.documentId as AutomergeDocumentId<DatabaseSchema>;
+	}
+
 	private async initOrCreateDocumentHandle<D extends DocumentSchema>(
 		name: string,
 		migrations: Migrations<D>,
 	) {
-		const databaseHandle = await this.documentHandlePromise;
-		const database = databaseHandle.doc() as Doc<DatabaseSchema>;
+		const databaseDocumentHandle = await this.databaseDocumentHandlePromise;
+		const database = databaseDocumentHandle.doc() as Doc<DatabaseSchema>;
 		let documentId = database.documents[name] as
 			| AutomergeDocumentId<D>
 			| undefined;
@@ -122,10 +130,10 @@ export class Database<
 				_mvid: -1,
 			} as D);
 			documentId = documentHandle.documentId;
-			databaseHandle.change((doc: DatabaseSchema) => {
+			databaseDocumentHandle.change((doc: DatabaseSchema) => {
 				doc.documents[name] = documentHandle.documentId;
 			});
-			documentIds.push(databaseHandle.documentId);
+			documentIds.push(databaseDocumentHandle.documentId);
 		} else {
 			documentHandle = await findDocument(this.repo, documentId);
 		}
@@ -149,8 +157,8 @@ export class Database<
 		R extends RowSchema,
 		C extends CollectionSchema<R>,
 	>(name: string, migrations: Migrations<C>) {
-		const databaseHandle = await this.documentHandlePromise;
-		const database = databaseHandle.doc() as Doc<DatabaseSchema>;
+		const databaseDocumentHandle = await this.databaseDocumentHandlePromise;
+		const database = databaseDocumentHandle.doc() as Doc<DatabaseSchema>;
 		let documentId = database.collections[name] as
 			| AutomergeDocumentId<C>
 			| undefined;
@@ -165,10 +173,10 @@ export class Database<
 				indexes: {},
 			} as C);
 			documentId = documentHandle.documentId;
-			databaseHandle.change((doc: DatabaseSchema) => {
+			databaseDocumentHandle.change((doc: DatabaseSchema) => {
 				doc.collections[name] = documentHandle.documentId;
 			});
-			documentIds.push(databaseHandle.documentId);
+			documentIds.push(databaseDocumentHandle.documentId);
 		} else {
 			documentHandle = await findDocument(this.repo, documentId);
 		}
@@ -193,8 +201,8 @@ export class Database<
 		} satisfies CollectionSchemaOptions<R>;
 
 		return new Collection<R, C, typeof collectionOptions>(
-			this.repo,
 			this.initOrCreateCollectionHandle(name, {}),
+			this.repo,
 			name,
 			collectionOptions,
 		);

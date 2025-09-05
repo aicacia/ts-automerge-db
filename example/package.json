@@ -33,12 +33,13 @@
 		"typescript": "^5.9.2",
 		"typescript-eslint": "^8.42.0",
 		"vite": "^7.1.4",
-		"vite-plugin-wasm": "^3.5.0",
-		"vite-plugin-devtools-json": "^1.0.0"
+		"vite-plugin-devtools-json": "^1.0.0",
+		"vite-plugin-wasm": "^3.5.0"
 	},
 	"dependencies": {
 		"@aicacia/automerge-db": "workspace:*",
 		"@automerge/automerge-repo": "^2.2.0",
+		"@automerge/automerge-repo-network-broadcastchannel": "^2.2.0",
 		"@automerge/automerge-repo-storage-indexeddb": "^2.2.0"
 	}
 }

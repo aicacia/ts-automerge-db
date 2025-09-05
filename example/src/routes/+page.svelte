@@ -8,7 +8,11 @@ import { resolve } from "$app/paths";
 let posts: RowResult<Post>[] = [];
 
 onMount(async () => {
-	const [newPosts, err] = await db.collections.posts.find();
+	const [newPosts, err] = await db.collections.posts.find({
+		sort(a, b) {
+			return a.createdAt - b.createdAt;
+		},
+	});
 	if (err) {
 		console.error(err);
 		return;

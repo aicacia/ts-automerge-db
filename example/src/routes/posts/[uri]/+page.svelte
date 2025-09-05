@@ -2,22 +2,20 @@
 import type { PageProps } from "./$types";
 import { db } from "$lib/db";
 import { resolve } from "$app/paths";
+import { goto } from "$app/navigation";
 
-let { params }: PageProps = $props();
+let { data }: PageProps = $props();
 
-let postPromise = $derived.by(async () => {
-	const [posts, err] = await db.collections.posts.findByIndex(
-		"uri",
-		params.uri,
-	);
-	if (err) {
-		throw err;
+let deleting = $state(false);
+async function onDelete() {
+	try {
+		deleting = true;
+		await db.collections.posts.delete(data.postId);
+		await goto(resolve("/"));
+	} finally {
+		deleting = false;
 	}
-	if (posts.length === 0) {
-		throw new Error("No Posts found");
-	}
-	return posts[0][1];
-});
+}
 </script>
 
 <div>
@@ -25,12 +23,12 @@ let postPromise = $derived.by(async () => {
 </div>
 
 <article class="flex flex-col">
-	{#await postPromise}
-		<div class="flex grow items-center justify-center">
-			<span>loading...</span>
+	<div class="flex flex-row justify-between">
+		<h1>{data.post.title}</h1>
+		<div class="flex flex-col">
+			<a class="btn primary" href={resolve('/posts/[uri]/edit', { uri: data.post.uri })}>Edit</a>
+			<button class="btn danger" onclick={onDelete} disabled={deleting}>Delete</button>
 		</div>
-	{:then post}
-		<h1>{post.title}</h1>
-		<p>{post.content}</p>
-	{/await}
+	</div>
+	<p>{data.post.content}</p>
 </article>

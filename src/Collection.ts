@@ -1,4 +1,5 @@
-import type { ChangeFn, Repo } from "@automerge/automerge-repo";
+import type { Doc, ChangeFn } from "@automerge/automerge";
+import type { DocHandleChangePayload, Repo } from "@automerge/automerge-repo";
 import {
 	createDocument,
 	findDocument,
@@ -8,11 +9,10 @@ import {
 	type DocumentSchema,
 	type Migrations,
 	migrate,
+	findDocumentCurrent,
 } from "./util/automerge";
-import type { Doc } from "@automerge/automerge";
 import { MultiError } from "./util/MultiError";
-import { Document } from "./Document";
-import type { Type } from "./Type";
+import { createType, type Type } from "./Type";
 import { err, ok, type Result } from "@aicacia/trycatch";
 
 export interface RowSchema extends DocumentSchema {
@@ -53,7 +53,7 @@ export interface CollectionIndexSchema<R extends RowSchema> {
 
 export interface CollectionSchema<R extends RowSchema> extends DocumentSchema {
 	name: string;
-	byId: Record<AutomergeDocumentId<R>, true>;
+	byId: Record<AutomergeDocumentId<R>, number>;
 	indexes: Record<string, AutomergeDocumentId<CollectionIndexSchema<R>>>;
 }
 
@@ -68,17 +68,47 @@ export interface CreateCollectionSchemaOptions<R extends RowSchema> {
 	readonly rowMigrations?: Migrations<R>;
 }
 
-export function createCollectionSchema<
-	R extends RowSchema,
-	const I extends CreateCollectionSchemaParameters<R>,
->(type: Type<R>, options: I) {
-	return {
+export function createCollectionSchema<R extends RowSchema>() {
+	const type = createType<R>();
+
+	return <const I extends CreateCollectionSchemaParameters<R>>(options: I) => ({
 		...options,
 		type,
-	};
+	});
 }
 
-export type CollectionFilterFn<R extends RowSchema> = (row: R) => boolean;
+export interface CollectionFilterOptions<R extends RowSchema> {
+	filter?(row: R): boolean;
+	sort?(a: R, b: R): number;
+	limit?: number;
+	offset?: number;
+}
+
+export interface CollectionEventCreate<R> {
+	type: "create";
+	id: AutomergeDocumentId<R>;
+	row: Doc<R>;
+}
+
+export interface CollectionEventUpdate<R> {
+	type: "update";
+	id: AutomergeDocumentId<R>;
+	row: Doc<R>;
+}
+
+export interface CollectionEventDelete<R> {
+	type: "delete";
+	id: AutomergeDocumentId<R>;
+}
+
+export type CollectionEvent<R> =
+	| CollectionEventCreate<R>
+	| CollectionEventUpdate<R>
+	| CollectionEventDelete<R>;
+
+export type CollectionSubscriber<R extends RowSchema> = (
+	event: CollectionEvent<R>,
+) => void;
 
 export type RowResult<R extends RowSchema> = [
 	id: AutomergeDocumentId<R>,
@@ -89,8 +119,11 @@ export class Collection<
 	R extends RowSchema,
 	C extends CollectionSchema<R>,
 	O extends CollectionSchemaOptions<R>,
-> extends Document<C> {
+> {
 	protected repo: Repo;
+	protected collectionDocumentHandlePromise: PromiseLike<
+		AutomergeDocumentHandle<C>
+	>;
 
 	protected name: string;
 	protected rowMigrations: Migrations<R>;
@@ -99,14 +132,14 @@ export class Collection<
 	protected indexes: CollectionSchemaOptionsIndexes<R>;
 
 	constructor(
+		collectionDocumentHandlePromise: PromiseLike<AutomergeDocumentHandle<C>>,
 		repo: Repo,
-		documentHandlePromise: PromiseLike<AutomergeDocumentHandle<C>>,
 		name: string,
 		options: O,
 	) {
-		super(documentHandlePromise);
-
+		this.collectionDocumentHandlePromise = collectionDocumentHandlePromise;
 		this.repo = repo;
+
 		this.name = name;
 		const rowMigrationVersionId = Math.max(
 			...Object.keys(options.rowMigrations).map(Number.parseInt),
@@ -122,80 +155,95 @@ export class Collection<
 		this.indexes = options.indexes;
 	}
 
+	subscribe(callback: CollectionSubscriber<R>) {
+		const repo = this.repo;
+
+		async function onCollectionDocumentChange(
+			payload: DocHandleChangePayload<C>,
+		) {
+			for (const patch of payload.patches) {
+				switch (patch.action) {
+					case "put": {
+						const [byId, rowId] = patch.path;
+
+						if (byId === "byId") {
+							callback({
+								type: patch.value === 0 ? "create" : "update",
+								id: rowId,
+								row: await findDocumentCurrent(repo, rowId),
+							});
+						}
+						break;
+					}
+					case "del": {
+						const [byId, rowId] = patch.path;
+
+						if (byId === "byId") {
+							callback({
+								type: "delete",
+								id: rowId,
+							});
+						}
+						break;
+					}
+					default: {
+						break;
+					}
+				}
+			}
+		}
+
+		const collectionDocumentHandlePromise =
+			this.collectionDocumentHandlePromise.then((collectionDocumentHandle) => {
+				collectionDocumentHandle.on("change", onCollectionDocumentChange);
+				return collectionDocumentHandle;
+			});
+
+		return () => {
+			collectionDocumentHandlePromise.then((collectionDocumentHandle) => {
+				collectionDocumentHandle.off("change", onCollectionDocumentChange);
+			});
+		};
+	}
+
 	async findById(rowId: AutomergeDocumentId<R>) {
+		const collectionDocumentHandle = await this.collectionDocumentHandlePromise;
+		const collection = collectionDocumentHandle.doc() as Doc<C>;
+
+		if (!collection.byId[rowId]) {
+			throw new Error(`Document ${rowId} is unavailable`);
+		}
+
 		const rowHandle = await findDocument(this.repo, rowId);
 		this.migrateRow(rowHandle);
 		return rowHandle;
 	}
 
 	async find(
-		filterFn?: CollectionFilterFn<R>,
-		limit = Number.POSITIVE_INFINITY,
-		offset = 0,
+		filterOptions: CollectionFilterOptions<R> = {},
 	): Promise<Result<RowResult<R>[], MultiError>> {
-		const useFilterFn = filterFn != null;
+		const collectionDocumentHandle = await this.collectionDocumentHandlePromise;
+		const collection = collectionDocumentHandle.doc() as Doc<C>;
+		const rowIds = Object.keys(collection.byId) as AutomergeDocumentId<R>[];
 
-		const startOffset = offset * limit;
-		const endOffset = startOffset + limit - 1;
-		const useStartAndEnd =
-			!Number.isNaN(startOffset) && !Number.isNaN(endOffset);
-
-		const documentHandle = await this.documentHandlePromise;
-		const collection = documentHandle.doc() as Doc<C>;
-
-		let rowIds = Object.keys(collection.byId) as AutomergeDocumentId<R>[];
-
-		if (!useFilterFn && useStartAndEnd) {
-			rowIds = rowIds.slice(startOffset, endOffset);
-		}
-
-		let rows: RowResult<R>[] = [];
-		const errors: Error[] = [];
-		await Promise.all(
-			rowIds.map(async (rowId) => {
-				let rowHandle: AutomergeDocumentHandle<R>;
-				try {
-					rowHandle = await findDocument(this.repo, rowId);
-				} catch (error) {
-					errors.push(error as Error);
-					return;
-				}
-
-				this.migrateRow(rowHandle);
-
-				if (useFilterFn) {
-					if (!filterFn(rowHandle.doc())) {
-						return;
-					}
-				}
-
-				rows.push([rowHandle.documentId, rowHandle.doc()]);
-			}),
-		);
-
-		if (useStartAndEnd) {
-			rows = rows.slice(startOffset, endOffset);
-		}
-
-		if (errors.length) {
-			return err(new MultiError(errors));
-		}
-
-		return ok(rows);
+		return this.filterRowIds(rowIds, filterOptions);
 	}
 
 	async findByIndex<
 		const K extends Extract<keyof O["indexes"], string>,
 		const V extends ExtractRowParametersFromIndex<R, O, K>,
-	>(indexName: K, values: V): Promise<Result<RowResult<R>[], MultiError>> {
-		const collectionHandle = await this.documentHandlePromise;
-		const indexDocuments = await this.getIndexesForCollection(
-			collectionHandle,
-			[indexName],
-		);
+	>(
+		indexName: K,
+		values: V,
+		options: CollectionFilterOptions<R> = {},
+	): Promise<Result<RowResult<R>[], MultiError>> {
+		const collectionHandle = await this.collectionDocumentHandlePromise;
+		const [indexDocuments, shouldFlushCollectionDocument] =
+			await this.getIndexesForCollection(collectionHandle, [indexName]);
 
-		const rows: RowResult<R>[] = [];
-		const errors: Error[] = [];
+		if (shouldFlushCollectionDocument) {
+			await this.repo.flush([collectionHandle.documentId]);
+		}
 
 		const indexDocument = indexDocuments[indexName];
 		if (indexDocument) {
@@ -205,30 +253,10 @@ export class Collection<
 				index[indexValue] ?? {},
 			) as AutomergeDocumentId<R>[];
 
-			if (rowIds.length > 0) {
-				await Promise.all(
-					rowIds.map(async (rowId) => {
-						let rowHandle: AutomergeDocumentHandle<R>;
-						try {
-							rowHandle = await findDocument(this.repo, rowId);
-						} catch (error) {
-							errors.push(error as Error);
-							return;
-						}
-
-						this.migrateRow(rowHandle);
-
-						rows.push([rowHandle.documentId, rowHandle.doc()]);
-					}),
-				);
-			}
+			return this.filterRowIds(rowIds, options);
 		}
 
-		if (errors.length) {
-			return err(new MultiError(errors));
-		}
-
-		return ok(rows);
+		return ok([]);
 	}
 
 	async create(initialValue: RawRowSchema<R>) {
@@ -243,13 +271,36 @@ export class Collection<
 		) as AutomergeDocumentHandle<R>;
 
 		const row = rowHandle.doc();
-		const documentHandle = await this.documentHandlePromise;
-		documentHandle.change((collection: C) => {
-			collection.byId[rowHandle.documentId] = true;
+		const collectionDocumentHandle = await this.collectionDocumentHandlePromise;
+		collectionDocumentHandle.change((collection: C) => {
+			collection.byId[rowHandle.documentId] = 0;
 		});
-		await this.createIndexesForRow(documentHandle, rowHandle.documentId, row);
 
-		await this.repo.flush([rowHandle.documentId, documentHandle.documentId]);
+		const flushDocumentIds = [
+			rowHandle.documentId,
+			collectionDocumentHandle.documentId,
+		] as AutomergeDocumentId[];
+
+		const rowIndexes = this.getIndexesForRow(row);
+		const rowIndexKeys = Object.keys(rowIndexes);
+
+		if (rowIndexKeys.length > 0) {
+			const [indexDocuments, _shouldFlushCollectionDocument] =
+				await this.getIndexesForCollection(
+					collectionDocumentHandle,
+					rowIndexKeys,
+				);
+
+			this.setIndexes(rowHandle.documentId, indexDocuments, rowIndexes);
+
+			flushDocumentIds.push(
+				...Object.values(indexDocuments).map(
+					(indexDocument) => indexDocument.documentId,
+				),
+			);
+		}
+
+		await this.repo.flush(flushDocumentIds);
 
 		return [rowHandle.documentId, rowHandle.doc()] as RowResult<R>;
 	}
@@ -258,7 +309,13 @@ export class Collection<
 		rowId: AutomergeDocumentId<R>,
 		changeFn: ChangeFn<RawRowSchema<R>>,
 	) {
+		const collectionDocumentHandle = await this.collectionDocumentHandlePromise;
 		const rowHandle = await findDocument(this.repo, rowId);
+
+		const flushDocumentIds = [
+			rowHandle.documentId,
+			collectionDocumentHandle.documentId,
+		] as AutomergeDocumentId[];
 
 		let promise: PromiseLike<void> = Promise.resolve();
 		rowHandle.change((row: R) => {
@@ -274,18 +331,27 @@ export class Collection<
 			);
 
 			if (rowIndexKeys.length) {
-				promise = this.documentHandlePromise
-					.then((documentHandle) =>
-						this.getIndexesForCollection(documentHandle, rowIndexKeys),
-					)
-					.then((indexDocuments) => {
-						this.deleteIndexes(indexDocuments, deletedIndexes, rowId);
-						return this.setIndexes(rowId, indexDocuments, newIndexes);
-					});
+				promise = this.getIndexesForCollection(
+					collectionDocumentHandle,
+					rowIndexKeys,
+				).then(async ([indexDocuments, _shouldFlushCollectionDocument]) => {
+					this.deleteIndexes(rowId, indexDocuments, deletedIndexes);
+					this.setIndexes(rowId, indexDocuments, newIndexes);
+
+					flushDocumentIds.push(
+						...Object.values(indexDocuments).map(
+							(indexDocument) => indexDocument.documentId,
+						),
+					);
+				});
 			}
+		});
+		collectionDocumentHandle.change((collection: C) => {
+			collection.byId[rowHandle.documentId] = Date.now();
 		});
 
 		await promise;
+		await this.repo.flush(flushDocumentIds);
 
 		return [rowId, rowHandle.doc()] as RowResult<R>;
 	}
@@ -293,20 +359,97 @@ export class Collection<
 	async delete(rowId: AutomergeDocumentId<R>) {
 		const rowHandle = await findDocument(this.repo, rowId);
 
+		const collectionDocumentHandle = await this.collectionDocumentHandlePromise;
+		collectionDocumentHandle.change((collection: C) => {
+			delete collection.byId[rowHandle.documentId];
+		});
+
+		const flushDocumentIds = [
+			collectionDocumentHandle.documentId,
+		] as AutomergeDocumentId[];
+
 		const row = rowHandle.doc();
 		const indexes = this.getIndexesForRow(row);
 		const rowIndexKeys = Object.keys(indexes);
 
 		if (rowIndexKeys.length) {
-			const documentHandle = await this.documentHandlePromise;
-			const indexDocuments = await this.getIndexesForCollection(
-				documentHandle,
-				rowIndexKeys,
+			const collectionDocumentHandle =
+				await this.collectionDocumentHandlePromise;
+			const [indexDocuments, _shouldFlushCollectionDocument] =
+				await this.getIndexesForCollection(
+					collectionDocumentHandle,
+					rowIndexKeys,
+				);
+			this.deleteIndexes(rowHandle.documentId, indexDocuments, indexes);
+
+			flushDocumentIds.push(
+				...Object.values(indexDocuments).map(
+					(indexDocument) => indexDocument.documentId,
+				),
 			);
-			this.deleteIndexes(indexDocuments, indexes, rowHandle.documentId);
 		}
 
-		rowHandle.delete();
+		this.repo.delete(rowHandle.documentId);
+
+		await this.repo.flush(flushDocumentIds);
+	}
+
+	private async filterRowIds(
+		rowIds: AutomergeDocumentId<R>[],
+		{
+			filter,
+			sort,
+			offset = 0,
+			limit = Number.POSITIVE_INFINITY,
+		}: CollectionFilterOptions<R>,
+	): Promise<Result<RowResult<R>[], MultiError>> {
+		const useFilterFn = filter != null;
+		const useSortFn = sort != null;
+
+		const startOffset = offset * limit;
+		const endOffset = startOffset + limit - 1;
+		const useStartAndEnd =
+			!Number.isNaN(startOffset) && !Number.isNaN(endOffset);
+
+		let rows: RowResult<R>[] = [];
+		const errors: Error[] = [];
+		await Promise.all(
+			(!useFilterFn && useStartAndEnd
+				? rowIds.slice(startOffset, endOffset)
+				: rowIds
+			).map(async (rowId) => {
+				let rowHandle: AutomergeDocumentHandle<R>;
+				try {
+					rowHandle = await findDocument(this.repo, rowId);
+				} catch (error) {
+					errors.push(error as Error);
+					return;
+				}
+
+				this.migrateRow(rowHandle);
+
+				if (useFilterFn) {
+					if (!filter(rowHandle.doc())) {
+						return;
+					}
+				}
+
+				rows.push([rowHandle.documentId, rowHandle.doc()]);
+			}),
+		);
+
+		if (useStartAndEnd) {
+			rows = rows.slice(startOffset, endOffset);
+		}
+		if (useSortFn) {
+			rows.sort(([_aId, a], [_bId, b]) => sort(a, b));
+		}
+
+		if (errors.length) {
+			return err(new MultiError(errors));
+		}
+
+		return ok(rows);
 	}
 
 	private migrateRow(row: AutomergeDocumentHandle<R>) {
@@ -325,7 +468,6 @@ export class Collection<
 				for (let i = 0; i < keys.length; i++) {
 					const rowKey = keys[i];
 					const rowKeyValue = row[rowKey];
-					// TODO: handle nulls in indexes
 					if (rowKeyValue === null) {
 						continue outer;
 					}
@@ -387,6 +529,7 @@ export class Collection<
 			AutomergeDocumentHandle<CollectionIndexSchema<R>>
 		>;
 
+		let shouldFlushCollectionDocument = false;
 		const collection = collectionHandle.doc();
 		await Promise.all(
 			names.map(async (name) => {
@@ -403,32 +546,21 @@ export class Collection<
 					collectionHandle.change((collection: C) => {
 						collection.indexes[name] = indexDocument.documentId;
 					});
+					shouldFlushCollectionDocument = true;
 				}
 			}),
 		);
 
-		return indexDocuments;
+		return [indexDocuments, shouldFlushCollectionDocument] as [
+			indexDocuments: Record<
+				string,
+				AutomergeDocumentHandle<CollectionIndexSchema<R>>
+			>,
+			shouldFlushCollectionDocument: boolean,
+		];
 	}
 
-	private async createIndexesForRow(
-		collectionHandle: AutomergeDocumentHandle<C>,
-		rowId: AutomergeDocumentId<R>,
-		row: R,
-	) {
-		const rowIndexes = this.getIndexesForRow(row);
-		const rowIndexKeys = Object.keys(rowIndexes);
-
-		if (rowIndexKeys.length > 0) {
-			const indexDocuments = await this.getIndexesForCollection(
-				collectionHandle,
-				rowIndexKeys,
-			);
-
-			await this.setIndexes(rowId, indexDocuments, rowIndexes);
-		}
-	}
-
-	private async setIndexes(
+	private setIndexes(
 		rowId: AutomergeDocumentId<R>,
 		indexDocuments: Record<
 			string,
@@ -447,17 +579,16 @@ export class Collection<
 				}
 				index[rowIndex][rowId] = true;
 			});
-			await this.repo.flush([indexDocument.documentId]);
 		}
 	}
 
 	private deleteIndexes(
+		rowId: AutomergeDocumentId<R>,
 		indexDocuments: Record<
 			string,
 			AutomergeDocumentHandle<CollectionIndexSchema<R>>
 		>,
 		rowIndexes: Record<string, string>,
-		rowId: AutomergeDocumentId<R>,
 	) {
 		for (const k of Object.keys(rowIndexes)) {
 			const key = k as string;

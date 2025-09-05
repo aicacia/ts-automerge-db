@@ -1,5 +1,6 @@
 import { browser } from "$app/environment";
 import { Repo } from "@automerge/automerge-repo";
+import { BroadcastChannelNetworkAdapter } from "@automerge/automerge-repo-network-broadcastchannel";
 import { IndexedDBStorageAdapter } from "@automerge/automerge-repo-storage-indexeddb";
 import {
 	Database,
@@ -16,6 +17,11 @@ const databaseDocumentId = (
 
 export const db = new Database(
 	new Repo({
+		network: [
+			new BroadcastChannelNetworkAdapter({
+				channelName: "automerge-db-example",
+			}),
+		],
 		storage: browser ? new IndexedDBStorageAdapter() : undefined,
 	}),
 	{
@@ -33,5 +39,9 @@ export const db = new Database(
 if (browser) {
 	db.id().then((dbId) => {
 		localStorage.setItem("database-document-id", dbId);
+	});
+
+	db.collections.posts.subscribe((event) => {
+		console.log(event);
 	});
 }

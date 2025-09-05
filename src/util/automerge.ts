@@ -1,4 +1,4 @@
-import type { ChangeFn } from "@automerge/automerge";
+import type { ChangeFn, Doc } from "@automerge/automerge";
 import type { Repo, DocHandle, DocumentId } from "@automerge/automerge-repo";
 
 export type AutomergeDocumentId<D = unknown> = DocumentId & { _type: D };
@@ -11,6 +11,13 @@ export async function findDocument<D>(
 	documentId: AutomergeDocumentId<D>,
 ) {
 	return (await repo.find<D>(documentId)) as AutomergeDocumentHandle<D>;
+}
+
+export async function findDocumentCurrent<D>(
+	repo: Repo,
+	documentId: AutomergeDocumentId<D>,
+) {
+	return (await findDocument(repo, documentId)).doc() as Doc<D>;
 }
 
 export function createDocument<D>(

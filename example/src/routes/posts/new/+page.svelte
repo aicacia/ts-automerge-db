@@ -7,7 +7,7 @@ let title = $state("");
 let uri = $state("");
 let content = $state("");
 
-let creating = false;
+let creating = $state(false);
 async function onSubmit(e: SubmitEvent) {
 	e.preventDefault();
 
@@ -18,8 +18,9 @@ async function onSubmit(e: SubmitEvent) {
 				title,
 				uri,
 				content,
+				createdAt: Date.now(),
 			});
-			await goto(resolve("/"));
+			await goto(resolve("/posts/[uri]", { uri }));
 		} finally {
 			creating = false;
 		}

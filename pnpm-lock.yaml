@@ -81,6 +81,9 @@ importers:
       '@automerge/automerge-repo':
         specifier: ^2.2.0
         version: 2.2.0
+      '@automerge/automerge-repo-network-broadcastchannel':
+        specifier: ^2.2.0
+        version: 2.2.0
       '@automerge/automerge-repo-storage-indexeddb':
         specifier: ^2.2.0
         version: 2.2.0
@@ -159,6 +162,9 @@ packages:
   '@ampproject/remapping@2.3.0':
     resolution: {integrity: sha512-30iZtAPgz+LTIYoeivqYo853f02jBYSd5uGnGpkFV0M3xOt9aN73erkgYAmZU43x4VfqcnLxW9Kpg3R5LC4YYw==}
     engines: {node: '>=6.0.0'}
+
+  '@automerge/automerge-repo-network-broadcastchannel@2.2.0':
+    resolution: {integrity: sha512-HXVEb2ehQT28iY4ku/7cRZ3GIpKcEsebvDePBX2z/VjUfamVzUPcquS/772VnjQC/4IMWnbx4YcRuPNi5CaYbQ==}
 
   '@automerge/automerge-repo-storage-indexeddb@2.2.0':
     resolution: {integrity: sha512-fob5ITgZs36m9ZqCflGsHYjrHUUC1HWCGe0LejLokAfXAk66ia3Pjbpe8IRz99H/Maeny5GpqwQv4/ykAzpMaA==}
@@ -2897,6 +2903,12 @@ snapshots:
     dependencies:
       '@jridgewell/gen-mapping': 0.3.13
       '@jridgewell/trace-mapping': 0.3.30
+
+  '@automerge/automerge-repo-network-broadcastchannel@2.2.0':
+    dependencies:
+      '@automerge/automerge-repo': 2.2.0
+    transitivePeerDependencies:
+      - supports-color
 
   '@automerge/automerge-repo-storage-indexeddb@2.2.0':
     dependencies:
