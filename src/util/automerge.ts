@@ -5,6 +5,9 @@ export type AutomergeDocumentId<D = unknown> = DocumentId & { _type: D };
 export type AutomergeDocumentHandle<D> = DocHandle<D> & {
 	documentId: AutomergeDocumentId<D>;
 };
+export type AutomergeDocumentRef<D = unknown> = {
+	_ref: AutomergeDocumentId<D>;
+};
 
 export async function findDocument<D>(
 	repo: Repo,

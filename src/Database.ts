@@ -1,21 +1,25 @@
 import type { Repo } from "@automerge/automerge-repo";
 import {
-	initOrCreateDocument,
 	type Migrations,
 	type AutomergeDocumentId,
 	type DocumentSchema,
-	createDocument,
-	findDocument,
-	migrate,
 	type AutomergeDocumentHandle,
+	initOrCreateDocument,
 } from "./util";
-import { Document, type CreateDocumentSchemaOptions } from "./Document";
+import {
+	Document,
+	initOrCreateDocumentHandle,
+	type CreateDocumentSchemaOptions,
+} from "./Document";
 import {
 	Collection,
 	type CreateCollectionSchemaOptions,
+	type CollectionIndex,
 	type CollectionSchema,
 	type CollectionSchemaOptions,
 	type RowSchema,
+	type CollectionSchemaOptionsIndexes,
+	initOrCreateCollectionHandle,
 } from "./Collection";
 import type { Doc } from "@automerge/automerge";
 import { isPromiseLike, type MaybePromiseLike } from "@aicacia/trycatch";
@@ -36,7 +40,9 @@ export type ExtractDocuments<Documents extends { [name: string]: unknown }> = {
 export type ExtractCollectionSchema<O> =
 	O extends CreateCollectionSchemaOptions<infer R>
 		? CollectionSchema<R> & {
-				indexes: { [indexName in keyof O["indexes"]]: AutomergeDocumentId<R> };
+				indexes: {
+					[IndexName in keyof O["indexes"]]: CollectionIndex<R>;
+				};
 			}
 		: unknown;
 
@@ -118,29 +124,25 @@ export class Database<
 	) {
 		const databaseDocumentHandle = await this.databaseDocumentHandlePromise;
 		const database = databaseDocumentHandle.doc() as Doc<DatabaseSchema>;
-		let documentId = database.documents[name] as
+		const documentId = database.documents[name] as
 			| AutomergeDocumentId<D>
 			| undefined;
-		let documentHandle: AutomergeDocumentHandle<D>;
 
 		const documentIds = [] as AutomergeDocumentId[];
 
+		const [documentHandle, shouldFlushDocument] =
+			await initOrCreateDocumentHandle<D>(this.repo, migrations, documentId);
+
 		if (!documentId) {
-			documentHandle = createDocument<D>(this.repo, {
-				_mvid: -1,
-			} as D);
-			documentId = documentHandle.documentId;
-			databaseDocumentHandle.change((doc: DatabaseSchema) => {
-				doc.documents[name] = documentHandle.documentId;
+			databaseDocumentHandle.change((database: DatabaseSchema) => {
+				database.documents[name] = documentHandle.documentId;
 			});
 			documentIds.push(databaseDocumentHandle.documentId);
-		} else {
-			documentHandle = await findDocument(this.repo, documentId);
 		}
-
-		if (migrate(documentHandle, migrations)) {
+		if (shouldFlushDocument) {
 			documentIds.push(documentHandle.documentId);
 		}
+
 		await this.repo.flush(documentIds);
 
 		return documentHandle;
@@ -156,37 +158,36 @@ export class Database<
 	private async initOrCreateCollectionHandle<
 		R extends RowSchema,
 		C extends CollectionSchema<R>,
-	>(name: string, migrations: Migrations<C>) {
+		I extends CollectionSchemaOptionsIndexes<R>,
+	>(name: string, indexes: I) {
 		const databaseDocumentHandle = await this.databaseDocumentHandlePromise;
 		const database = databaseDocumentHandle.doc() as Doc<DatabaseSchema>;
-		let documentId = database.collections[name] as
+		const collectionDocumentId = database.collections[name] as
 			| AutomergeDocumentId<C>
 			| undefined;
-		let documentHandle: AutomergeDocumentHandle<C>;
 
 		const documentIds = [] as AutomergeDocumentId[];
 
-		if (!documentId) {
-			documentHandle = createDocument<C>(this.repo, {
-				_mvid: -1,
-				byId: {},
-				indexes: {},
-			} as C);
-			documentId = documentHandle.documentId;
-			databaseDocumentHandle.change((doc: DatabaseSchema) => {
-				doc.collections[name] = documentHandle.documentId;
+		const [collectionDocumentHandle, shouldFlushDocument] =
+			await initOrCreateCollectionHandle<R, C, I>(
+				this.repo,
+				indexes,
+				collectionDocumentId,
+			);
+
+		if (!collectionDocumentId) {
+			databaseDocumentHandle.change((database: DatabaseSchema) => {
+				database.documents[name] = collectionDocumentHandle.documentId;
 			});
 			documentIds.push(databaseDocumentHandle.documentId);
-		} else {
-			documentHandle = await findDocument(this.repo, documentId);
+		}
+		if (shouldFlushDocument) {
+			documentIds.push(collectionDocumentHandle.documentId);
 		}
 
-		if (migrate(documentHandle, migrations)) {
-			documentIds.push(documentHandle.documentId);
-		}
 		await this.repo.flush(documentIds);
 
-		return documentHandle;
+		return collectionDocumentHandle;
 	}
 
 	private createCollection<
@@ -199,9 +200,13 @@ export class Database<
 			indexes: options.indexes ?? {},
 			rowMigrations: options.rowMigrations ?? {},
 		} satisfies CollectionSchemaOptions<R>;
+		type CollectionOptions = typeof collectionOptions;
 
-		return new Collection<R, C, typeof collectionOptions>(
-			this.initOrCreateCollectionHandle(name, {}),
+		return new Collection<R, C, CollectionOptions>(
+			this.initOrCreateCollectionHandle<R, C, CollectionOptions["indexes"]>(
+				name,
+				collectionOptions.indexes,
+			),
 			this.repo,
 			name,
 			collectionOptions,

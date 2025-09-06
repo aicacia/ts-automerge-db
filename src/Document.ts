@@ -1,12 +1,17 @@
 import type {
 	ChangeFn,
 	DocHandleChangePayload,
+	Repo,
 } from "@automerge/automerge-repo";
-import type {
-	RawDocumentSchema,
-	AutomergeDocumentHandle,
-	DocumentSchema,
-	Migrations,
+import {
+	type RawDocumentSchema,
+	type AutomergeDocumentHandle,
+	type DocumentSchema,
+	type Migrations,
+	createDocument,
+	findDocument,
+	migrate,
+	type AutomergeDocumentId,
 } from "./util/automerge";
 import type { Doc } from "@automerge/automerge";
 import { createType, type Type } from "./Type";
@@ -70,4 +75,30 @@ export class Document<D extends DocumentSchema> {
 			});
 		};
 	}
+}
+
+export async function initOrCreateDocumentHandle<D extends DocumentSchema>(
+	repo: Repo,
+	migrations: Migrations<D>,
+	documentId?: AutomergeDocumentId<D>,
+): Promise<
+	[documentHandle: AutomergeDocumentHandle<D>, shouldFlushDocument: boolean]
+> {
+	let documentHandle: AutomergeDocumentHandle<D>;
+	let shouldFlushDocument = false;
+
+	if (!documentId) {
+		documentHandle = createDocument<D>(repo, {
+			_mvid: -1,
+		} as D);
+		shouldFlushDocument = true;
+	} else {
+		documentHandle = await findDocument(repo, documentId);
+	}
+
+	if (migrate(documentHandle, migrations)) {
+		shouldFlushDocument = true;
+	}
+
+	return [documentHandle, shouldFlushDocument];
 }

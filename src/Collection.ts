@@ -24,13 +24,34 @@ export type RawRowSchema<R extends RowSchema> = Omit<
 	"_collection"
 >;
 
-export type CollectionIndex<R extends RowSchema> =
+export type CollectionIndexKey<R extends RowSchema> =
 	| keyof R
 	| readonly (keyof R)[];
 
+export function collectionIndexKeysAreEqual<R extends RowSchema>(
+	a: CollectionIndexKey<R>,
+	b: CollectionIndexKey<R>,
+) {
+	if (a === b) {
+		return true;
+	}
+	if (Array.isArray(a) && Array.isArray(b)) {
+		if (a.length !== b.length) {
+			return false;
+		}
+		for (let i = 0; i < a.length; i++) {
+			if (a[i] !== b[i]) {
+				return false;
+			}
+		}
+		return true;
+	}
+	return false;
+}
+
 export type CollectionSchemaOptionsIndexes<R extends RowSchema> = Record<
 	string,
-	CollectionIndex<R>
+	CollectionIndexKey<R>
 >;
 
 export interface CollectionSchemaOptions<R extends RowSchema> {
@@ -39,7 +60,7 @@ export interface CollectionSchemaOptions<R extends RowSchema> {
 	readonly rowMigrations: Migrations<R>;
 }
 
-export type ExtractRowParametersFromIndex<
+export type ExtractRowParametersFromIndexKey<
 	R extends RowSchema,
 	O extends CollectionSchemaOptions<R>,
 	K extends keyof O["indexes"],
@@ -47,14 +68,19 @@ export type ExtractRowParametersFromIndex<
 	? ReadonlyArray<R[Extract<AV, keyof R>]>
 	: R[Extract<O["indexes"][K], keyof R>];
 
-export interface CollectionIndexSchema<R extends RowSchema> {
+export interface CollectionIndexDocumentSchema<R extends RowSchema> {
 	[key: string]: Record<AutomergeDocumentId<R>, true>;
+}
+
+export interface CollectionIndex<R extends RowSchema> {
+	key: CollectionIndexKey<R>;
+	indexDocumentId: AutomergeDocumentId<CollectionIndexDocumentSchema<R>>;
 }
 
 export interface CollectionSchema<R extends RowSchema> extends DocumentSchema {
 	name: string;
 	byId: Record<AutomergeDocumentId<R>, number>;
-	indexes: Record<string, AutomergeDocumentId<CollectionIndexSchema<R>>>;
+	indexes: Record<string, CollectionIndex<R>>;
 }
 
 export interface CreateCollectionSchemaParameters<R extends RowSchema> {
@@ -231,24 +257,23 @@ export class Collection<
 
 	async findByIndex<
 		const K extends Extract<keyof O["indexes"], string>,
-		const V extends ExtractRowParametersFromIndex<R, O, K>,
+		const V extends ExtractRowParametersFromIndexKey<R, O, K>,
 	>(
 		indexName: K,
 		values: V,
 		options: CollectionFilterOptions<R> = {},
 	): Promise<Result<RowResult<R>[], MultiError>> {
 		const collectionHandle = await this.collectionDocumentHandlePromise;
-		const [indexDocuments, shouldFlushCollectionDocument] =
-			await this.getIndexesForCollection(collectionHandle, [indexName]);
-
-		if (shouldFlushCollectionDocument) {
-			await this.repo.flush([collectionHandle.documentId]);
-		}
+		const indexDocuments = await getIndexDocuments<R, C>(
+			this.repo,
+			collectionHandle,
+			[indexName],
+		);
 
 		const indexDocument = indexDocuments[indexName];
 		if (indexDocument) {
-			const index = indexDocument.doc() as CollectionIndexSchema<R>;
-			const indexValue = this.getIndexForValues(values);
+			const index = indexDocument.doc() as CollectionIndexDocumentSchema<R>;
+			const indexValue = getIndexForValues(values as never);
 			const rowIds = Object.keys(
 				index[indexValue] ?? {},
 			) as AutomergeDocumentId<R>[];
@@ -275,23 +300,24 @@ export class Collection<
 		collectionDocumentHandle.change((collection: C) => {
 			collection.byId[rowHandle.documentId] = 0;
 		});
+		const collectionDocument = collectionDocumentHandle.doc() as Doc<C>;
 
 		const flushDocumentIds = [
 			rowHandle.documentId,
 			collectionDocumentHandle.documentId,
 		] as AutomergeDocumentId[];
 
-		const rowIndexes = this.getIndexesForRow(row);
+		const rowIndexes = getIndexesForRow(row, collectionDocument.indexes);
 		const rowIndexKeys = Object.keys(rowIndexes);
 
 		if (rowIndexKeys.length > 0) {
-			const [indexDocuments, _shouldFlushCollectionDocument] =
-				await this.getIndexesForCollection(
-					collectionDocumentHandle,
-					rowIndexKeys,
-				);
+			const indexDocuments = await getIndexDocuments<R, C>(
+				this.repo,
+				collectionDocumentHandle,
+				rowIndexKeys,
+			);
 
-			this.setIndexes(rowHandle.documentId, indexDocuments, rowIndexes);
+			setIndexes(rowHandle.documentId, indexDocuments, rowIndexes);
 
 			flushDocumentIds.push(
 				...Object.values(indexDocuments).map(
@@ -310,6 +336,7 @@ export class Collection<
 		changeFn: ChangeFn<RawRowSchema<R>>,
 	) {
 		const collectionDocumentHandle = await this.collectionDocumentHandlePromise;
+		const collectionDocument = collectionDocumentHandle.doc() as Doc<C>;
 		const rowHandle = await findDocument(this.repo, rowId);
 
 		const flushDocumentIds = [
@@ -319,9 +346,9 @@ export class Collection<
 
 		let promise: PromiseLike<void> = Promise.resolve();
 		rowHandle.change((row: R) => {
-			const previousIndexes = this.getIndexesForRow(row);
+			const previousIndexes = getIndexesForRow(row, collectionDocument.indexes);
 			changeFn(row);
-			const currentIndexes = this.getIndexesForRow(row);
+			const currentIndexes = getIndexesForRow(row, collectionDocument.indexes);
 			const { newIndexes, deletedIndexes } = indexChanges(
 				previousIndexes,
 				currentIndexes,
@@ -331,12 +358,13 @@ export class Collection<
 			);
 
 			if (rowIndexKeys.length) {
-				promise = this.getIndexesForCollection(
+				promise = getIndexDocuments<R, C>(
+					this.repo,
 					collectionDocumentHandle,
 					rowIndexKeys,
-				).then(async ([indexDocuments, _shouldFlushCollectionDocument]) => {
-					this.deleteIndexes(rowId, indexDocuments, deletedIndexes);
-					this.setIndexes(rowId, indexDocuments, newIndexes);
+				).then(async (indexDocuments) => {
+					deleteIndexes(rowId, indexDocuments, deletedIndexes);
+					setIndexes(rowId, indexDocuments, newIndexes);
 
 					flushDocumentIds.push(
 						...Object.values(indexDocuments).map(
@@ -363,24 +391,23 @@ export class Collection<
 		collectionDocumentHandle.change((collection: C) => {
 			delete collection.byId[rowHandle.documentId];
 		});
+		const collectionDocument = collectionDocumentHandle.doc() as Doc<C>;
 
 		const flushDocumentIds = [
 			collectionDocumentHandle.documentId,
 		] as AutomergeDocumentId[];
 
 		const row = rowHandle.doc();
-		const indexes = this.getIndexesForRow(row);
+		const indexes = getIndexesForRow(row, collectionDocument.indexes);
 		const rowIndexKeys = Object.keys(indexes);
 
 		if (rowIndexKeys.length) {
-			const collectionDocumentHandle =
-				await this.collectionDocumentHandlePromise;
-			const [indexDocuments, _shouldFlushCollectionDocument] =
-				await this.getIndexesForCollection(
-					collectionDocumentHandle,
-					rowIndexKeys,
-				);
-			this.deleteIndexes(rowHandle.documentId, indexDocuments, indexes);
+			const indexDocuments = await getIndexDocuments<R, C>(
+				this.repo,
+				collectionDocumentHandle,
+				rowIndexKeys,
+			);
+			deleteIndexes(rowHandle.documentId, indexDocuments, indexes);
 
 			flushDocumentIds.push(
 				...Object.values(indexDocuments).map(
@@ -455,153 +482,268 @@ export class Collection<
 	private migrateRow(row: AutomergeDocumentHandle<R>) {
 		return migrate(row, this.rowMigrations);
 	}
+}
 
-	private getIndexesForRow(row: R) {
-		const indexes = {} as Record<string, string>;
+export async function initOrCreateCollectionHandle<
+	R extends RowSchema,
+	C extends CollectionSchema<R>,
+	I extends CollectionSchemaOptionsIndexes<R>,
+>(
+	repo: Repo,
+	indexes: I,
+	collectionDocumentId?: AutomergeDocumentId<C>,
+): Promise<
+	[
+		collectionDocumentHandle: AutomergeDocumentHandle<C>,
+		shouldFlushCollectionDocument: boolean,
+	]
+> {
+	let collectionDocumentHandle: AutomergeDocumentHandle<C>;
+	let shouldFlushCollectionDocument = false;
 
-		outer: for (const [name, key] of Object.entries(this.indexes)) {
-			let index = null;
+	if (!collectionDocumentId) {
+		collectionDocumentHandle = createDocument<C>(repo, {
+			_mvid: -1,
+			byId: {},
+			indexes: Object.entries(indexes).reduce(
+				(acc, [name, key]) => {
+					acc[name] = {
+						key,
+						indexDocumentId: createDocument<CollectionIndexDocumentSchema<R>>(
+							repo,
+							{},
+						).documentId,
+					};
+					return acc;
+				},
+				{} as Record<string, CollectionIndex<R>>,
+			),
+		} as C);
+		shouldFlushCollectionDocument = true;
+	} else {
+		collectionDocumentHandle = await findDocument(repo, collectionDocumentId);
+		let collectionDocument = collectionDocumentHandle.doc() as Doc<C>;
 
-			if (Array.isArray(key)) {
-				const keys: Array<keyof R> = key;
+		const newIndexes: [name: string, key: CollectionIndexKey<R>][] = [];
+		const updatedIndexes: [name: string, key: CollectionIndexKey<R>][] = [];
+		const deletedIndexes: string[] = [];
+		const reIndexIndexes: string[] = [];
 
-				for (let i = 0; i < keys.length; i++) {
-					const rowKey = keys[i];
-					const rowKeyValue = row[rowKey];
-					if (rowKeyValue === null) {
-						continue outer;
-					}
-					if (index === null) {
-						index = JSON.stringify(rowKeyValue);
-					} else {
-						index += JSON.stringify(rowKeyValue);
-					}
-					if (i < keys.length - 1) {
-						index += "|";
-					}
-				}
-			} else {
-				const rowKey = key as keyof R;
-				const rowKeyValue = row[rowKey];
-				if (rowKeyValue === null) {
-					continue;
-				}
-				index = JSON.stringify(rowKeyValue);
+		for (const name of new Set(
+			Object.keys(indexes).concat(Object.keys(collectionDocument.indexes)),
+		)) {
+			const newIndexKey = indexes[name];
+			const currentIndex = collectionDocument.indexes[name];
+
+			if (!newIndexKey) {
+				deletedIndexes.push(name);
+				continue;
 			}
-			if (index !== null) {
-				const indexName = name as string;
-				indexes[indexName] = index;
+			if (!currentIndex) {
+				newIndexes.push([name, newIndexKey]);
+				reIndexIndexes.push(name);
+				continue;
 			}
+			if (collectionIndexKeysAreEqual(currentIndex.key, newIndexKey)) {
+				continue;
+			}
+			updatedIndexes.push([name, newIndexKey]);
+			reIndexIndexes.push(name);
 		}
 
-		return indexes;
-	}
-
-	private getIndexForValues<K extends keyof R>(
-		values: R[K] | readonly R[K][],
-	): string {
-		if (Array.isArray(values) && values.length > 0) {
-			let index: string | null = null;
-
-			for (let i = 0; i < values.length; i++) {
-				const value = values[i];
-				if (index === null) {
-					index = JSON.stringify(value);
-				} else {
-					index += JSON.stringify(value);
-				}
-				if (i < values.length - 1) {
-					index += "|";
-				}
-			}
-
-			return index as string;
+		if (updatedIndexes.length || deletedIndexes.length || newIndexes.length) {
+			shouldFlushCollectionDocument = true;
 		}
-		return JSON.stringify(values);
-	}
-
-	private async getIndexesForCollection(
-		collectionHandle: AutomergeDocumentHandle<C>,
-		names: string[],
-	) {
 		const indexDocuments = {} as Record<
 			string,
-			AutomergeDocumentHandle<CollectionIndexSchema<R>>
+			AutomergeDocumentHandle<CollectionIndexDocumentSchema<R>>
 		>;
 
-		let shouldFlushCollectionDocument = false;
-		const collection = collectionHandle.doc();
-		await Promise.all(
-			names.map(async (name) => {
-				const indexDocumentId = collection.indexes[name];
+		collectionDocumentHandle.change((collection: C) => {
+			for (const name of deletedIndexes) {
+				repo.delete(collection.indexes[name].indexDocumentId);
+				delete collection.indexes[name];
+			}
+			for (const [name, key] of newIndexes) {
+				const indexDocumentHandle = createDocument<
+					CollectionIndexDocumentSchema<R>
+				>(repo, {});
 
-				if (indexDocumentId) {
-					indexDocuments[name] = await findDocument(this.repo, indexDocumentId);
+				collection.indexes[name] = {
+					key,
+					indexDocumentId: indexDocumentHandle.documentId,
+				};
+				indexDocuments[name] = indexDocumentHandle;
+			}
+			for (const [name, key] of updatedIndexes) {
+				const indexDocumentHandle = createDocument<
+					CollectionIndexDocumentSchema<R>
+				>(repo, {});
+
+				const index = collection.indexes[name];
+				repo.delete(index.indexDocumentId);
+				index.key = key;
+				index.indexDocumentId = indexDocumentHandle.documentId;
+
+				indexDocuments[name] = indexDocumentHandle;
+			}
+		});
+
+		if (reIndexIndexes.length) {
+			collectionDocument = collectionDocumentHandle.doc();
+
+			await Promise.all(
+				(Object.keys(collectionDocument.byId) as AutomergeDocumentId<R>[]).map(
+					async (rowId) => {
+						const rowHandle = await findDocument(repo, rowId);
+						const row = rowHandle.doc() as R;
+						const rowIndexes = getIndexesForRow(
+							row,
+							collectionDocument.indexes,
+							reIndexIndexes,
+						);
+
+						setIndexes(rowId, indexDocuments, rowIndexes);
+					},
+				),
+			);
+		}
+	}
+
+	return [collectionDocumentHandle, shouldFlushCollectionDocument];
+}
+
+function getIndexesForRow<R extends RowSchema>(
+	row: R,
+	indexes: Record<string, CollectionIndex<R>>,
+	indexNames: string[] = Object.keys(indexes),
+) {
+	const rowIndexes = {} as Record<string, string>;
+
+	outer: for (const indexName of indexNames) {
+		const index = indexes[indexName];
+		let rowIndexValue = null;
+
+		if (Array.isArray(index.key)) {
+			const keys = index.key as (keyof R)[];
+
+			for (let i = 0; i < keys.length; i++) {
+				const rowKey = keys[i];
+				const rowKeyValue = row[rowKey];
+				if (rowKeyValue === null) {
+					continue outer;
+				}
+				if (rowIndexValue === null) {
+					rowIndexValue = JSON.stringify(rowKeyValue);
 				} else {
-					const indexDocument = createDocument(
-						this.repo,
-						{} as CollectionIndexSchema<R>,
-					);
-					indexDocuments[name] = indexDocument;
-					collectionHandle.change((collection: C) => {
-						collection.indexes[name] = indexDocument.documentId;
-					});
-					shouldFlushCollectionDocument = true;
+					rowIndexValue += JSON.stringify(rowKeyValue);
 				}
-			}),
-		);
-
-		return [indexDocuments, shouldFlushCollectionDocument] as [
-			indexDocuments: Record<
-				string,
-				AutomergeDocumentHandle<CollectionIndexSchema<R>>
-			>,
-			shouldFlushCollectionDocument: boolean,
-		];
-	}
-
-	private setIndexes(
-		rowId: AutomergeDocumentId<R>,
-		indexDocuments: Record<
-			string,
-			AutomergeDocumentHandle<CollectionIndexSchema<R>>
-		>,
-		rowIndexes: Record<string, string>,
-	) {
-		for (const k of Object.keys(rowIndexes)) {
-			const key = k as string;
-			const indexDocument = indexDocuments[key];
-			const rowIndex = rowIndexes[key];
-
-			indexDocument.change((index: CollectionIndexSchema<R>) => {
-				if (!index[rowIndex]) {
-					index[rowIndex] = {};
+				if (i < keys.length - 1) {
+					rowIndexValue += "|";
 				}
-				index[rowIndex][rowId] = true;
-			});
+			}
+		} else {
+			const rowKey = index.key as keyof R;
+			const rowKeyValue = row[rowKey];
+			if (rowKeyValue === null) {
+				continue;
+			}
+			rowIndexValue = JSON.stringify(rowKeyValue);
+		}
+		if (rowIndexValue !== null) {
+			rowIndexes[indexName] = rowIndexValue;
 		}
 	}
 
-	private deleteIndexes(
-		rowId: AutomergeDocumentId<R>,
-		indexDocuments: Record<
-			string,
-			AutomergeDocumentHandle<CollectionIndexSchema<R>>
-		>,
-		rowIndexes: Record<string, string>,
-	) {
-		for (const k of Object.keys(rowIndexes)) {
-			const key = k as string;
-			const indexDocument = indexDocuments[key];
-			const rowIndex = rowIndexes[key];
+	return rowIndexes;
+}
 
-			indexDocument.change((index: CollectionIndexSchema<R>) => {
-				const indexIds = index[rowIndex];
-				if (indexIds) {
-					delete indexIds[rowId];
-				}
-			});
+function getIndexForValues<R extends RowSchema, K extends keyof R>(
+	values: R[K] | readonly R[K][],
+): string {
+	if (Array.isArray(values) && values.length > 0) {
+		let indexValue: string | null = null;
+
+		for (let i = 0; i < values.length; i++) {
+			const value = values[i];
+			if (indexValue === null) {
+				indexValue = JSON.stringify(value);
+			} else {
+				indexValue += JSON.stringify(value);
+			}
+			if (i < values.length - 1) {
+				indexValue += "|";
+			}
 		}
+
+		return indexValue as string;
+	}
+	return JSON.stringify(values);
+}
+
+async function getIndexDocuments<
+	R extends RowSchema,
+	C extends CollectionSchema<R>,
+>(repo: Repo, collectionHandle: AutomergeDocumentHandle<C>, names: string[]) {
+	const indexDocuments = {} as Record<
+		string,
+		AutomergeDocumentHandle<CollectionIndexDocumentSchema<R>>
+	>;
+
+	const collection = collectionHandle.doc() as Doc<C>;
+	await Promise.all(
+		names.map(async (name) => {
+			indexDocuments[name] = await findDocument(
+				repo,
+				collection.indexes[name].indexDocumentId,
+			);
+		}),
+	);
+
+	return indexDocuments;
+}
+
+function setIndexes<R extends RowSchema>(
+	rowId: AutomergeDocumentId<R>,
+	indexDocuments: Record<
+		string,
+		AutomergeDocumentHandle<CollectionIndexDocumentSchema<R>>
+	>,
+	rowIndexes: Record<string, string>,
+) {
+	for (const k of Object.keys(rowIndexes)) {
+		const key = k as string;
+		const indexDocument = indexDocuments[key];
+		const rowIndex = rowIndexes[key];
+
+		indexDocument.change((index: CollectionIndexDocumentSchema<R>) => {
+			if (!index[rowIndex]) {
+				index[rowIndex] = {};
+			}
+			index[rowIndex][rowId] = true;
+		});
+	}
+}
+
+function deleteIndexes<R extends RowSchema>(
+	rowId: AutomergeDocumentId<R>,
+	indexDocuments: Record<
+		string,
+		AutomergeDocumentHandle<CollectionIndexDocumentSchema<R>>
+	>,
+	rowIndexes: Record<string, string>,
+) {
+	for (const k of Object.keys(rowIndexes)) {
+		const key = k as string;
+		const indexDocument = indexDocuments[key];
+		const rowIndex = rowIndexes[key];
+
+		indexDocument.change((index: CollectionIndexDocumentSchema<R>) => {
+			const indexIds = index[rowIndex];
+			if (indexIds) {
+				delete indexIds[rowId];
+			}
+		});
 	}
 }
 
