@@ -1,4 +1,4 @@
-import { createCollectionSchema, type RowSchema } from "@aicacia/automerge-db";
+import { createCollectionSchema, type RowSchema } from '@aicacia/automerge-db';
 
 export interface Post extends RowSchema {
 	uri: string;
@@ -9,6 +9,6 @@ export interface Post extends RowSchema {
 
 export const posts = createCollectionSchema<Post>()({
 	indexes: {
-		uri: "uri",
-	},
+		uri: 'uri'
+	}
 });

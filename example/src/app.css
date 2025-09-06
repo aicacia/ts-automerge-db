@@ -1,4 +1,4 @@
-@import "tailwindcss";
+@import 'tailwindcss';
 
 @custom-variant dark (&:where(.dark, .dark *));
 
@@ -50,7 +50,7 @@
 		@apply relative flex h-full w-full flex-col overflow-hidden bg-gray-50 text-gray-950 dark:bg-gray-900 dark:text-white;
 	}
 	input,
-	[role="textbox"],
+	[role='textbox'],
 	select,
 	textarea {
 		@apply rounded-lg border border-gray-600 bg-gray-50 px-3 py-1 text-base text-gray-950 placeholder-gray-600 outline-none focus:outline-none dark:bg-gray-900 dark:text-white;
@@ -66,12 +66,12 @@
 		@apply pe-4;
 	}
 	input[disabled],
-	[role="textbox"][disabled],
+	[role='textbox'][disabled],
 	select[disabled],
 	textarea[disabled] {
 		@apply cursor-not-allowed opacity-50;
 	}
-	input[type="checkbox"] {
+	input[type='checkbox'] {
 		@apply mx-1 text-gray-950;
 	}
 	textarea {
@@ -79,25 +79,25 @@
 	}
 
 	input.invalid,
-	[role="textbox"].invalid,
+	[role='textbox'].invalid,
 	select.invalid,
 	textarea.invalid {
 		@apply border-red-600 placeholder-red-600;
 	}
 	input.valid,
-	[role="textbox"].valid,
+	[role='textbox'].valid,
 	select.valid,
 	textarea.valid {
 		@apply border-green-600 placeholder-green-600;
 	}
 	input.warning,
-	[role="textbox"].warning,
+	[role='textbox'].warning,
 	select.warning,
 	textarea.warning {
 		@apply border-orange-600 placeholder-orange-600;
 	}
 	input.untested,
-	[role="textbox"].untested,
+	[role='textbox'].untested,
 	select.untested,
 	textarea.untested {
 		@apply border-gray-600 placeholder-gray-600;

@@ -1,24 +1,24 @@
 <script lang="ts">
-import { onMount } from "svelte";
-import type { RowResult } from "@aicacia/automerge-db";
-import type { Post } from "$lib/posts";
-import { db } from "$lib/db";
-import { resolve } from "$app/paths";
+	import { onMount } from 'svelte';
+	import type { RowResult } from '@aicacia/automerge-db';
+	import type { Post } from '$lib/posts';
+	import { db } from '$lib/db';
+	import { resolve } from '$app/paths';
 
-let posts: RowResult<Post>[] = [];
+	let posts: RowResult<Post>[] = [];
 
-onMount(async () => {
-	const [newPosts, err] = await db.collections.posts.find({
-		sort(a, b) {
-			return a.createdAt - b.createdAt;
-		},
+	onMount(async () => {
+		const [newPosts, err] = await db.collections.posts.find({
+			sort(a, b) {
+				return a.createdAt - b.createdAt;
+			}
+		});
+		if (err) {
+			console.error(err);
+			return;
+		}
+		posts = newPosts;
 	});
-	if (err) {
-		console.error(err);
-		return;
-	}
-	posts = newPosts;
-});
 </script>
 
 <div class="flex flex-row items-center justify-between">

@@ -1,21 +1,21 @@
 <script lang="ts">
-import type { PageProps } from "./$types";
-import { db } from "$lib/db";
-import { resolve } from "$app/paths";
-import { goto } from "$app/navigation";
+	import type { PageProps } from './$types';
+	import { db } from '$lib/db';
+	import { resolve } from '$app/paths';
+	import { goto } from '$app/navigation';
 
-let { data }: PageProps = $props();
+	let { data }: PageProps = $props();
 
-let deleting = $state(false);
-async function onDelete() {
-	try {
-		deleting = true;
-		await db.collections.posts.delete(data.postId);
-		await goto(resolve("/"));
-	} finally {
-		deleting = false;
+	let deleting = $state(false);
+	async function onDelete() {
+		try {
+			deleting = true;
+			await db.collections.posts.delete(data.postId);
+			await goto(resolve('/'));
+		} finally {
+			deleting = false;
+		}
 	}
-}
 </script>
 
 <div>

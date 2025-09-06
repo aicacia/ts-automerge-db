@@ -1,40 +1,58 @@
+<script lang="ts" module>
+	import z from 'zod';
+
+	const EditPostSchema = z.object({
+		title: z.string().min(3),
+		uri: z.string().regex(/[a-zA-Z0-9\-\._~]+/),
+		content: z.string().nonempty()
+	});
+
+	type EditPost = z.infer<typeof EditPostSchema>;
+</script>
+
 <script lang="ts">
-import { goto, invalidateAll } from "$app/navigation";
-import { resolve } from "$app/paths";
-import { db } from "$lib/db";
-import type { PageProps } from "./$types";
+	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
+	import { db } from '$lib/db';
+	import type { PageProps } from './$types';
+	import Errors from '$lib/components/Errors.svelte';
+	import { zodErrorToObject } from '$lib/error';
 
-let { data }: PageProps = $props();
+	let { data }: PageProps = $props();
 
-let title = $state(data.post.title);
-let uri = $state(data.post.uri);
-let content = $state(data.post.content);
+	const editPost: EditPost = $state(data.post);
+	let editPostResult = $state<z.ZodSafeParseResult<EditPost>>();
+	let editPostErrors = $derived(zodErrorToObject(editPostResult?.error));
 
-let updating = $state(false);
-async function onSubmit(e: SubmitEvent) {
-	e.preventDefault();
+	let updating = $state(false);
 
-	if (title && uri && content) {
+	async function onSubmit(e: SubmitEvent) {
+		e.preventDefault();
 		try {
 			updating = true;
-			await db.collections.posts.update(data.postId, (post) => {
-				if (post.title !== title) {
-					post.title = title;
+
+			const result = (editPostResult = await EditPostSchema.safeParseAsync(editPost));
+
+			if (result.error) {
+				return;
+			}
+
+			const [_postId, post] = await db.collections.posts.update(data.postId, (post) => {
+				if (post.title !== result.data.title) {
+					post.title = result.data.title;
 				}
-				if (post.content !== content) {
-					post.content = content;
+				if (post.uri !== result.data.uri) {
+					post.uri = result.data.uri;
 				}
-				if (post.uri !== uri) {
-					post.uri = uri;
+				if (post.content !== result.data.content) {
+					post.content = result.data.content;
 				}
 			});
-			await invalidateAll();
-			await goto(resolve("/posts/[uri]", { uri }));
+			await goto(resolve('/posts/[uri]', { uri: post.uri }));
 		} finally {
 			updating = false;
 		}
 	}
-}
 </script>
 
 <div>
@@ -44,15 +62,18 @@ async function onSubmit(e: SubmitEvent) {
 <form class="flex flex-col" onsubmit={onSubmit}>
 	<label class="flex flex-col">
 		Title
-		<input type="text" name="title" bind:value={title} />
+		<input type="text" name="title" bind:value={editPost.title} />
+		<Errors errors={editPostErrors.title} />
 	</label>
 	<label class="flex flex-col">
 		URI
-		<input type="text" name="uri" bind:value={uri} />
+		<input type="text" name="uri" bind:value={editPost.uri} />
+		<Errors errors={editPostErrors.uri} />
 	</label>
 	<label class="flex flex-col">
 		Content
-		<textarea bind:value={content}></textarea>
+		<textarea bind:value={editPost.content}></textarea>
+		<Errors errors={editPostErrors.content} />
 	</label>
 	<input type="submit" class="btn primary mt-4" value="Update" disabled={updating} />
 </form>

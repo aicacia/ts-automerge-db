@@ -40,6 +40,7 @@
 		"@aicacia/automerge-db": "workspace:*",
 		"@automerge/automerge-repo": "^2.2.0",
 		"@automerge/automerge-repo-network-broadcastchannel": "^2.2.0",
-		"@automerge/automerge-repo-storage-indexeddb": "^2.2.0"
+		"@automerge/automerge-repo-storage-indexeddb": "^2.2.0",
+		"zod": "^4.1.5"
 	}
 }
