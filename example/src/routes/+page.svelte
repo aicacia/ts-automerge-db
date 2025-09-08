@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import type { RowResult } from '@aicacia/automerge-db';
-	import type { Post } from '$lib/posts';
+	import type { Post } from '$lib/db/posts';
 	import { db } from '$lib/db';
 	import { resolve } from '$app/paths';
 

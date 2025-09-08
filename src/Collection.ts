@@ -64,9 +64,43 @@ export type ExtractRowParametersFromIndexKey<
 	R extends RowSchema,
 	O extends CollectionSchemaOptions<R>,
 	K extends keyof O["indexes"],
-> = O["indexes"][K] extends ReadonlyArray<infer AV>
-	? ReadonlyArray<R[Extract<AV, keyof R>]>
-	: R[Extract<O["indexes"][K], keyof R>];
+> = O["indexes"][K] extends readonly [infer K0]
+	? readonly [R[Extract<K0, keyof R>]]
+	: O["indexes"][K] extends readonly [infer K0, infer K1]
+		? readonly [R[Extract<K0, keyof R>], R[Extract<K1, keyof R>]]
+		: O["indexes"][K] extends readonly [infer K0, infer K1, infer K2]
+			? readonly [
+					R[Extract<K0, keyof R>],
+					R[Extract<K1, keyof R>],
+					R[Extract<K2, keyof R>],
+				]
+			: O["indexes"][K] extends readonly [
+						infer K0,
+						infer K1,
+						infer K2,
+						infer K3,
+					]
+				? readonly [
+						R[Extract<K0, keyof R>],
+						R[Extract<K1, keyof R>],
+						R[Extract<K2, keyof R>],
+						R[Extract<K3, keyof R>],
+					]
+				: O["indexes"][K] extends readonly [
+							infer K0,
+							infer K1,
+							infer K2,
+							infer K3,
+							infer K4,
+						]
+					? readonly [
+							R[Extract<K0, keyof R>],
+							R[Extract<K1, keyof R>],
+							R[Extract<K2, keyof R>],
+							R[Extract<K3, keyof R>],
+							R[Extract<K4, keyof R>],
+						]
+					: R[Extract<O["indexes"][K], keyof R>];
 
 export interface CollectionIndexDocumentSchema<R extends RowSchema> {
 	[key: string]: Record<AutomergeDocumentId<R>, true>;
@@ -256,8 +290,8 @@ export class Collection<
 	}
 
 	async findByIndex<
-		const K extends Extract<keyof O["indexes"], string>,
-		const V extends ExtractRowParametersFromIndexKey<R, O, K>,
+		K extends Extract<keyof O["indexes"], string>,
+		V extends ExtractRowParametersFromIndexKey<R, O, K>,
 	>(
 		indexName: K,
 		values: V,
