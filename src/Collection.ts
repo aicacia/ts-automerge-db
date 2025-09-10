@@ -535,18 +535,21 @@ export async function initOrCreateCollectionHandle<
 	let collectionDocumentHandle: AutomergeDocumentHandle<C>;
 	let shouldFlushCollectionDocument = false;
 
+	const documentIds: AutomergeDocumentId[] = [];
+
 	if (!collectionDocumentId) {
 		collectionDocumentHandle = createDocument<C>(repo, {
-			_mvid: -1,
+			_mvid: 0,
 			byId: {},
 			indexes: Object.entries(indexes).reduce(
 				(acc, [name, key]) => {
+					const indexDocumentHandle = createDocument<
+						CollectionIndexDocumentSchema<R>
+					>(repo, {});
+					documentIds.push(indexDocumentHandle.documentId);
 					acc[name] = {
 						key,
-						indexDocumentId: createDocument<CollectionIndexDocumentSchema<R>>(
-							repo,
-							{},
-						).documentId,
+						indexDocumentId: indexDocumentHandle.documentId,
 					};
 					return acc;
 				},
@@ -608,6 +611,8 @@ export async function initOrCreateCollectionHandle<
 					indexDocumentId: indexDocumentHandle.documentId,
 				};
 				indexDocuments[name] = indexDocumentHandle;
+
+				documentIds.push(indexDocumentHandle.documentId);
 			}
 			for (const [name, key] of updatedIndexes) {
 				const indexDocumentHandle = createDocument<
@@ -620,6 +625,8 @@ export async function initOrCreateCollectionHandle<
 				index.indexDocumentId = indexDocumentHandle.documentId;
 
 				indexDocuments[name] = indexDocumentHandle;
+
+				documentIds.push(indexDocumentHandle.documentId);
 			}
 		});
 
@@ -642,6 +649,10 @@ export async function initOrCreateCollectionHandle<
 				),
 			);
 		}
+	}
+
+	if (documentIds.length) {
+		await repo.flush(documentIds);
 	}
 
 	return [collectionDocumentHandle, shouldFlushCollectionDocument];

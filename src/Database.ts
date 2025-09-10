@@ -95,22 +95,28 @@ export class Database<
 			initOrCreateDocument(repo, databaseMigrations, databaseDocumentId),
 		);
 		this.repo = repo;
-		// @ts-ignore
 		this.documents = Object.fromEntries(
-			// @ts-ignore
-			Object.entries(options.documents).map(([name, documentOptions]) =>
-				// @ts-ignore
-				[name, this.createDocument(name, documentOptions.migrations ?? {})],
-			),
-		);
-		// @ts-ignore
+			(
+				Object.entries(options.documents) as [
+					name: string,
+					documentOptions: CreateDocumentSchemaOptions<DocumentSchema>,
+				][]
+			).map(([name, documentOptions]) => [
+				name,
+				this.createDocument(name, documentOptions.migrations ?? {}),
+			]),
+		) as ExtractDocuments<Documents>;
 		this.collections = Object.fromEntries(
-			// @ts-ignore
-			Object.entries(options.collections).map(([name, collectionOptions]) =>
-				// @ts-ignore
-				[name, this.createCollection(name, collectionOptions)],
-			),
-		);
+			(
+				Object.entries(options.collections) as [
+					name: string,
+					collectionOptions: CreateCollectionSchemaOptions<RowSchema>,
+				][]
+			).map(([name, collectionOptions]) => [
+				name,
+				this.createCollection(name, collectionOptions),
+			]),
+		) as ExtractCollections<Collections>;
 	}
 
 	async id() {
@@ -177,7 +183,7 @@ export class Database<
 
 		if (!collectionDocumentId) {
 			databaseDocumentHandle.change((database: DatabaseSchema) => {
-				database.documents[name] = collectionDocumentHandle.documentId;
+				database.collections[name] = collectionDocumentHandle.documentId;
 			});
 			documentIds.push(databaseDocumentHandle.documentId);
 		}
