@@ -6,11 +6,12 @@ coverage/
 docs/
 src/
 test-data/
+example/
 node_modules/
-.editorconfig
 biome.json
 .gitignore
 npm-debug.log
+pnpm-workspace.yaml
 rollup.config.mjs
 tsconfig.browser.json
 tsconfig.esm.json

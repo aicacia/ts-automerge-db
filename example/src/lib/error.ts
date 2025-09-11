@@ -11,6 +11,7 @@ export function zodErrorToObject<T>(error?: z.ZodError<T>) {
 	}
 
 	for (const issue of error.issues) {
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
 		let errorsPart = errors as any;
 
 		for (let i = 0; i < issue.path.length - 1; i++) {
