@@ -1,10 +1,8 @@
 packages:
   - example
 
-ignoredBuiltDependencies:
-  - '@biomejs/biome'
-
 onlyBuiltDependencies:
-  - '@swc/core'
+  - "@biomejs/biome"
+  - "@tailwindcss/oxide"
   - cbor-extract
   - esbuild

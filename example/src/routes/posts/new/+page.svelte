@@ -12,7 +12,7 @@
 			uri: z
 				.string()
 				.min(3)
-				.regex(/[a-zA-Z0-9\-\._~]+/),
+				.regex(/[a-zA-Z0-9\-._~]+/),
 			content: z.string().nonempty()
 		}),
 		{

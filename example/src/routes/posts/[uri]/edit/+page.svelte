@@ -12,7 +12,7 @@
 	const editPostForm = createForm(
 		z.object({
 			title: z.string().min(3),
-			uri: z.string().regex(/[a-zA-Z0-9\-\._~]+/),
+			uri: z.string().regex(/[a-zA-Z0-9\-._~]+/),
 			content: z.string().nonempty()
 		}),
 		{

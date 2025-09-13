@@ -24,7 +24,6 @@
 		"lint": "biome lint ./src",
 		"format": "biome format --write .",
 		"preCommit": "npm run format && npm run lint && npm run coverage",
-		"prepare": "husky",
 		"example": "pnpm --filter example dev"
 	},
 	"keywords": ["automerge", "database"],
@@ -39,7 +38,6 @@
 		"@rollup/plugin-typescript": "12",
 		"@rollup/plugin-wasm": "6",
 		"@types/tape": "5",
-		"husky": "9",
 		"nyc": "17",
 		"rollup": "4",
 		"rollup-plugin-esm-import-to-url": "2",
@@ -66,7 +64,7 @@
 	},
 	"pnpm": {
 		"onlyBuiltDependencies": [
-			"@swc/core",
+			"@biomejs/biome",
 			"@tailwindcss/oxide",
 			"cbor-extract",
 			"esbuild"

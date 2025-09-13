@@ -11,7 +11,7 @@
 </script>
 
 <ul class="list-none p-0">
-	{#each errors as error}
+	{#each errors as error (error.path)}
 		<li class="text-red-500">{error.message}</li>
 	{/each}
 </ul>
