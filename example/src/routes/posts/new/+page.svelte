@@ -1,32 +1,26 @@
-<script lang="ts" module>
-	import z from 'zod';
-
-	const NewPostSchema = z.object({
-		title: z.string().min(3),
-		uri: z
-			.string()
-			.min(3)
-			.regex(/[a-zA-Z0-9\-\._~]+/),
-		content: z.string().nonempty()
-	});
-
-	type NewPost = z.infer<typeof NewPostSchema>;
-</script>
-
 <script lang="ts">
+	import z from 'zod';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { db } from '$lib/db';
-	import { zodErrorToObject } from '$lib/error';
+	import { createForm } from '$lib/error.svelte';
 	import Errors from '$lib/components/Errors.svelte';
 
-	const newPost = $state<NewPost>({
-		title: '',
-		uri: '',
-		content: ''
-	});
-	let newPostResult = $state<z.ZodSafeParseResult<NewPost>>();
-	let newPostErrors = $derived(zodErrorToObject(newPostResult?.error));
+	const newPostForm = createForm(
+		z.object({
+			title: z.string().min(3),
+			uri: z
+				.string()
+				.min(3)
+				.regex(/[a-zA-Z0-9\-\._~]+/),
+			content: z.string().nonempty()
+		}),
+		{
+			title: '',
+			uri: '',
+			content: ''
+		}
+	);
 
 	let creating = $state(false);
 	async function onSubmit(e: SubmitEvent) {
@@ -34,9 +28,9 @@
 		try {
 			creating = true;
 
-			const result = (newPostResult = await NewPostSchema.safeParseAsync(newPost));
+			const result = await newPostForm.validate();
 
-			if (result.error) {
+			if (!result.success) {
 				return;
 			}
 
@@ -58,18 +52,18 @@
 <form class="flex flex-col" onsubmit={onSubmit}>
 	<label class="flex flex-col">
 		Title
-		<input type="text" name="title" bind:value={newPost.title} />
-		<Errors errors={newPostErrors.title} />
+		<input type="text" name="title" bind:value={newPostForm.title.value} />
+		<Errors errors={newPostForm.title.errors} />
 	</label>
 	<label class="flex flex-col">
 		URI
-		<input type="text" name="uri" bind:value={newPost.uri} />
-		<Errors errors={newPostErrors.uri} />
+		<input type="text" name="uri" bind:value={newPostForm.uri.value} />
+		<Errors errors={newPostForm.uri.errors} />
 	</label>
 	<label class="flex flex-col">
 		Content
-		<textarea bind:value={newPost.content}></textarea>
-		<Errors errors={newPostErrors.content} />
+		<textarea bind:value={newPostForm.content.value}></textarea>
+		<Errors errors={newPostForm.content.errors} />
 	</label>
 	<input type="submit" class="btn primary mt-4" value="Post" disabled={creating} />
 </form>

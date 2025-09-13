@@ -1,28 +1,26 @@
-<script lang="ts" module>
-	import z from 'zod';
-
-	const EditPostSchema = z.object({
-		title: z.string().min(3),
-		uri: z.string().regex(/[a-zA-Z0-9\-\._~]+/),
-		content: z.string().nonempty()
-	});
-
-	type EditPost = z.infer<typeof EditPostSchema>;
-</script>
-
 <script lang="ts">
+	import z from 'zod';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { db } from '$lib/db';
 	import type { PageProps } from './$types';
 	import Errors from '$lib/components/Errors.svelte';
-	import { zodErrorToObject } from '$lib/error';
+	import { createForm } from '$lib/error.svelte';
 
 	let { data }: PageProps = $props();
 
-	const editPost: EditPost = $state(data.post);
-	let editPostResult = $state<z.ZodSafeParseResult<EditPost>>();
-	let editPostErrors = $derived(zodErrorToObject(editPostResult?.error));
+	const editPostForm = createForm(
+		z.object({
+			title: z.string().min(3),
+			uri: z.string().regex(/[a-zA-Z0-9\-\._~]+/),
+			content: z.string().nonempty()
+		}),
+		{
+			title: data.post.title,
+			uri: data.post.title,
+			content: data.post.content
+		}
+	);
 
 	let updating = $state(false);
 
@@ -31,9 +29,9 @@
 		try {
 			updating = true;
 
-			const result = (editPostResult = await EditPostSchema.safeParseAsync(editPost));
+			const result = await editPostForm.validate();
 
-			if (result.error) {
+			if (!result.success) {
 				return;
 			}
 
@@ -62,18 +60,18 @@
 <form class="flex flex-col" onsubmit={onSubmit}>
 	<label class="flex flex-col">
 		Title
-		<input type="text" name="title" bind:value={editPost.title} />
-		<Errors errors={editPostErrors.title} />
+		<input type="text" name="title" bind:value={editPostForm.title.value} />
+		<Errors errors={editPostForm.title.errors} />
 	</label>
 	<label class="flex flex-col">
 		URI
-		<input type="text" name="uri" bind:value={editPost.uri} />
-		<Errors errors={editPostErrors.uri} />
+		<input type="text" name="uri" bind:value={editPostForm.uri.value} />
+		<Errors errors={editPostForm.uri.errors} />
 	</label>
 	<label class="flex flex-col">
 		Content
-		<textarea bind:value={editPost.content}></textarea>
-		<Errors errors={editPostErrors.content} />
+		<textarea bind:value={editPostForm.content.value}></textarea>
+		<Errors errors={editPostForm.content.errors} />
 	</label>
 	<input type="submit" class="btn primary mt-4" value="Update" disabled={updating} />
 </form>
